@@ -1,5 +1,5 @@
 use semver::Version;
-use config::NewVersion;
+use crate::config::NewVersion;
 
 pub fn update_version(old: &mut Version, by: NewVersion) {
     match by {

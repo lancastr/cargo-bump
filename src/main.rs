@@ -1,51 +1,49 @@
 extern crate clap;
 extern crate semver;
-extern crate tomllib;
+extern crate toml_edit;
 
 mod config;
 mod version;
 
-use std::path::Path;
-use std::io::{Read, Write};
 use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+use toml_edit::{value, Document};
 
 use semver::Version;
-use tomllib::TOMLParser;
-use tomllib::types::{ParseResult, Value};
 
 fn main() {
     let conf = config::get_config();
     let raw_data = read_file(&conf.manifest);
-    let parser = TOMLParser::new();
-    let (mut parser, result) = parser.parse(&raw_data);
-    match result {
-        ParseResult::Full => {}
-        _ => panic!("couldn't parse Cargo.toml"),
-    }
+    let mut doc = raw_data
+        .parse::<Document>()
+        .expect("couldn't parse Cargo.toml");
 
-    let raw_value = parser
-        .get_value("package.version")
-        .expect("package.version missing");
-    let mut version = match raw_value {
-        Value::String(raw_version, _) => Version::parse(&raw_version).unwrap(),
-        _ => panic!("version not a string"),
+    let table = doc.as_table_mut();
+
+    let raw_value = table
+        .get("package")
+        .and_then(|r| r.as_table().and_then(|r| r.get("version")))
+        .expect("could not find version");
+
+    let mut version = if raw_value.is_str() {
+        Version::parse(raw_value.as_str().unwrap()).expect("bad version format")
+    } else {
+        panic!("version not a string");
     };
 
     let old_version = version.clone();
     version::update_version(&mut version, conf.version);
     println!("Version {} -> {}", old_version, version);
 
-    parser.set_value(
-        "package.version",
-        Value::basic_string(version.to_string()).unwrap(),
-    );
+    table["package"]["version"] = value(version.to_string());
 
     let mut f = OpenOptions::new()
         .write(true)
         .truncate(true)
         .open(&conf.manifest)
         .unwrap();
-    f.write_all(format!("{}", parser).as_bytes()).unwrap();
+    f.write_all(doc.to_string().as_bytes()).unwrap();
 }
 
 fn read_file(file: &Path) -> String {
